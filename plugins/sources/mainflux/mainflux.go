@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/emqx/kuiper/common"
 	"github.com/emqx/kuiper/xstream/api"
 	"github.com/mainflux/mainflux/messaging"
 	"github.com/mainflux/mainflux/messaging/nats"
@@ -12,23 +13,45 @@ import (
 
 const (
 	queue = "kuiper"
-	url   = "nats://localhost:4222"
 )
+
+type mainfluxSourceConfig struct {
+	Domain   string
+	Port     string
+	Channel  string
+	Subtopic string
+}
 
 type mainfluxSource struct {
 	pubSub   nats.PubSub
 	consumer chan<- api.SourceTuple
 	errCh    chan<- error
+	topic    string
 }
 
 var _ api.Source = (*mainfluxSource)(nil)
 
 func (s *mainfluxSource) Configure(topic string, props map[string]interface{}) error {
-	var err error
-	s.pubSub, err = nats.NewPubSub(url, queue, nil)
-	if err != nil {
-		return fmt.Errorf("Failed to subscribe to nats with error: %v", err)
+	cfg := &mainfluxSourceConfig{}
+	if err := common.MapToStruct(props, cfg); err != nil {
+		return fmt.Errorf("read properties %v fail with error: %v", props, err)
 	}
+
+	addr := fmt.Sprintf("tcp://%s:%s/", cfg.Domain, cfg.Port)
+	pubSub, err := nats.NewPubSub(addr, queue, nil)
+	if err != nil {
+		return fmt.Errorf("Failed to connect to nats at address %s with error: %v", addr, err)
+	}
+	s.pubSub = pubSub
+
+	topic = nats.SubjectAllChannels
+	if len(cfg.Channel) > 0 {
+		topic = "channels." + cfg.Channel
+		if len(cfg.Subtopic) > 0 {
+			topic += "." + cfg.Subtopic
+		}
+	}
+	s.topic = topic
 
 	return nil
 }
@@ -37,15 +60,14 @@ func (s *mainfluxSource) Open(ctx api.StreamContext, consumer chan<- api.SourceT
 	logger := ctx.GetLogger()
 	logger.Debug("open mainflux source")
 
-	s.consumer = consumer
-	s.errCh = errCh
-
-	err := s.pubSub.Subscribe(nats.SubjectAllChannels, s.handle)
+	err := s.pubSub.Subscribe(s.topic, s.handle)
 	if err != nil {
-		errCh <- err
+		errCh <- fmt.Errorf("Failed to subscribe to nats topic %s with error: %v", s.topic, err)
 		return
 	}
-	defer s.pubSub.Close()
+
+	s.consumer = consumer
+	s.errCh = errCh
 
 	<-ctx.Done()
 }
@@ -63,6 +85,7 @@ func (s *mainfluxSource) handle(message messaging.Message) error {
 	}
 
 	for _, rec := range pack.Records {
+		// convert struct to map
 		recJson, err := json.Marshal(rec)
 		if err != nil {
 			s.errCh <- err
