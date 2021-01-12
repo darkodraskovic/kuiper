@@ -16,10 +16,10 @@ const (
 )
 
 type mainfluxSourceConfig struct {
-	Domain   string
-	Port     string
-	Channel  string
-	Subtopic string
+	Host     string `json:"host"`
+	Port     string `json:"port"`
+	Channel  string `json:"channel"`
+	Subtopic string `json:"subtopic"`
 }
 
 type mainfluxSource struct {
@@ -36,8 +36,14 @@ func (s *mainfluxSource) Configure(topic string, props map[string]interface{}) e
 	if err := common.MapToStruct(props, cfg); err != nil {
 		return fmt.Errorf("read properties %v fail with error: %v", props, err)
 	}
+	if cfg.Host == "" {
+		return fmt.Errorf("property host is required")
+	}
+	if cfg.Port == "" {
+		return fmt.Errorf("property port is required")
+	}
 
-	addr := fmt.Sprintf("tcp://%s:%s/", cfg.Domain, cfg.Port)
+	addr := fmt.Sprintf("tcp://%s:%s/", cfg.Host, cfg.Port)
 	pubSub, err := nats.NewPubSub(addr, queue, nil)
 	if err != nil {
 		return fmt.Errorf("Failed to connect to nats at address %s with error: %v", addr, err)
