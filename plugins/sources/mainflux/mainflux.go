@@ -15,7 +15,7 @@ const (
 	queue = "kuiper"
 )
 
-type mainfluxSourceConfig struct {
+type mainfluxConfig struct {
 	Host     string `json:"host"`
 	Port     string `json:"port"`
 	Channel  string `json:"channel"`
@@ -32,8 +32,8 @@ type mainfluxSource struct {
 
 var _ api.Source = (*mainfluxSource)(nil)
 
-func (s *mainfluxSource) Configure(topic string, props map[string]interface{}) error {
-	cfg := &mainfluxSourceConfig{}
+func (ms *mainfluxSource) Configure(topic string, props map[string]interface{}) error {
+	cfg := &mainfluxConfig{}
 	if err := common.MapToStruct(props, cfg); err != nil {
 		return fmt.Errorf("Read properties %v fail with error: %v", props, err)
 	}
@@ -49,7 +49,7 @@ func (s *mainfluxSource) Configure(topic string, props map[string]interface{}) e
 	if err != nil {
 		return fmt.Errorf("Failed to connect to nats at address %s with error: %v", addr, err)
 	}
-	s.pubSub = pubSub
+	ms.pubSub = pubSub
 
 	topic = nats.SubjectAllChannels
 	if len(cfg.Channel) > 0 {
@@ -58,31 +58,31 @@ func (s *mainfluxSource) Configure(topic string, props map[string]interface{}) e
 			topic += "." + cfg.Subtopic
 		}
 	}
-	s.topic = topic
+	ms.topic = topic
 
 	return nil
 }
 
-func (s *mainfluxSource) Open(ctx api.StreamContext, consumer chan<- api.SourceTuple, errCh chan<- error) {
+func (ms *mainfluxSource) Open(ctx api.StreamContext, consumer chan<- api.SourceTuple, errCh chan<- error) {
 	logger := ctx.GetLogger()
-	logger.Debug("Open mainflux source.")
+	logger.Debug("Opening mainflux source.")
 
-	err := s.pubSub.Subscribe(s.topic, s.handle)
+	err := ms.pubSub.Subscribe(ms.topic, ms.handle)
 	if err != nil {
-		errCh <- fmt.Errorf("Failed to subscribe to nats topic %s with error: %v", s.topic, err)
+		errCh <- fmt.Errorf("Failed to subscribe to nats topic %s with error: %v", ms.topic, err)
 		return
 	}
-	logger.Debugf("Subscribed to nats topic %s.", s.topic)
+	logger.Debugf("Subscribed to nats topic %s.", ms.topic)
 
-	s.logger = logger
-	s.consumer = consumer
-	s.errCh = errCh
+	ms.logger = logger
+	ms.consumer = consumer
+	ms.errCh = errCh
 
 	<-ctx.Done()
 }
 
-func (s *mainfluxSource) handle(message messaging.Message) error {
-	s.logger.Debugf("Received SenML message %v.", message)
+func (ms *mainfluxSource) handle(message messaging.Message) error {
+	ms.logger.Debugf("Received SenML message %v.", message)
 
 	meta := make(map[string]interface{})
 	meta["channel"] = message.Channel
@@ -92,35 +92,36 @@ func (s *mainfluxSource) handle(message messaging.Message) error {
 
 	pack, err := senml.Decode(message.Payload, senml.JSON)
 	if err != nil {
-		s.errCh <- err
+		ms.errCh <- err
 	}
 
 	for _, rec := range pack.Records {
 		// convert struct to map
 		recJson, err := json.Marshal(rec)
 		if err != nil {
-			s.errCh <- err
+			ms.errCh <- err
 		}
 		recMap := make(map[string]interface{})
 		err = json.Unmarshal(recJson, &recMap)
 		if err != nil {
-			s.errCh <- err
+			ms.errCh <- err
 		}
 
-		s.consumer <- api.NewDefaultSourceTuple(recMap, meta)
+		ms.consumer <- api.NewDefaultSourceTuple(recMap, meta)
 	}
 
 	return nil
 }
 
-func (s *mainfluxSource) Close(ctx api.StreamContext) error {
-	if s.pubSub != nil {
-		s.pubSub.Close()
+func (ms *mainfluxSource) Close(ctx api.StreamContext) error {
+	if ms.pubSub != nil {
+		ms.pubSub.Close()
 	}
 
 	return nil
 }
 
+// Mainflux exports the constructor used to instantiates the plugin
 func Mainflux() api.Source {
 	return &mainfluxSource{}
 }
