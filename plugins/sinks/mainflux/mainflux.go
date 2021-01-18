@@ -19,9 +19,9 @@ type mainfluxConfig struct {
 }
 
 type mainfluxSink struct {
-	cfg   *mainfluxConfig
-	pub   nats.Publisher
-	topic string
+	cfg *mainfluxConfig
+	pub nats.Publisher
+	// topic string
 }
 
 // Configure sink with properties from rule action definition
@@ -57,16 +57,10 @@ func (ms *mainfluxSink) Open(ctx api.StreamContext) (err error) {
 	}
 	ms.pub = pub
 
-	topic := "channels." + ms.cfg.Channel
-	if len(ms.cfg.Subtopic) > 0 {
-		topic += "." + ms.cfg.Subtopic
-	}
-	ms.topic = topic
-
 	return
 }
 
-// Collect publishes to nats messages transferred to sink
+// Collect publishes messages transferred to sink to nats
 func (ms *mainfluxSink) Collect(ctx api.StreamContext, item interface{}) error {
 	logger := ctx.GetLogger()
 	logger.Debugf("mainflux sink receive %v", item)
@@ -75,7 +69,6 @@ func (ms *mainfluxSink) Collect(ctx api.StreamContext, item interface{}) error {
 	msg.Channel = ms.cfg.Channel
 	msg.Subtopic = ms.cfg.Subtopic
 	msg.Created = time.Now().Unix()
-	msg.Protocol = "tcp"
 
 	rec, ok := item.(senml.Record)
 	if !ok {
@@ -87,8 +80,8 @@ func (ms *mainfluxSink) Collect(ctx api.StreamContext, item interface{}) error {
 		return fmt.Errorf("Failed to encode message to senml format")
 	}
 	msg.Payload = paylaod
-	if err := ms.pub.Publish(ms.topic, msg); err != nil {
-		return fmt.Errorf("Failed to publish message to %s", ms.topic)
+	if err := ms.pub.Publish(ms.cfg.Channel, msg); err != nil {
+		return fmt.Errorf("Failed to publish message to %s", ms.cfg.Channel)
 	}
 
 	return nil
