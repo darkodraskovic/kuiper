@@ -81,7 +81,9 @@ func (ms *mainfluxSink) Collect(ctx api.StreamContext, item interface{}) error {
 	if err := json.Unmarshal(itemBytes, &rec); err != nil {
 		return fmt.Errorf("Failed to unmarshal %v to senml", item)
 	}
-	rec[0].BaseName = baseName
+	if rec[0].BaseName == "" && rec[0].Name == "" {
+		rec[0].BaseName = "rules-engine"
+	}
 	pack := senml.Pack{Records: []senml.Record{rec[0]}}
 	payload, err := senml.Encode(pack, senml.JSON)
 	if err != nil {
