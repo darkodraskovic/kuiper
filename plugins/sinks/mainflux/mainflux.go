@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/mainflux/mainflux/messaging/nats"
 	"github.com/mainflux/senml"
 )
+
+const baseName = "kuiper"
 
 type mainfluxConfig struct {
 	Host     string `json:"host"`
@@ -70,16 +73,22 @@ func (ms *mainfluxSink) Collect(ctx api.StreamContext, item interface{}) error {
 	msg.Subtopic = ms.cfg.Subtopic
 	msg.Created = time.Now().Unix()
 
-	rec, ok := item.(senml.Record)
+	itemBytes, ok := item.([]byte)
 	if !ok {
-		return fmt.Errorf("Failed to assert senml record format of %v", item)
+		logger.Debug("mainflux sink received non byte data")
 	}
-	pack := senml.Pack{Records: []senml.Record{rec}}
-	paylaod, err := senml.Encode(pack, senml.JSON)
+	var rec []senml.Record
+	if err := json.Unmarshal(itemBytes, &rec); err != nil {
+		return fmt.Errorf("Failed to unmarshal %v to senml", item)
+	}
+	rec[0].BaseName = baseName
+	pack := senml.Pack{Records: []senml.Record{rec[0]}}
+	payload, err := senml.Encode(pack, senml.JSON)
 	if err != nil {
-		return fmt.Errorf("Failed to encode message to senml format")
+		return fmt.Errorf("Failed to encode %v to JSON", pack)
 	}
-	msg.Payload = paylaod
+
+	msg.Payload = payload
 	if err := ms.pub.Publish(ms.cfg.Channel, msg); err != nil {
 		return fmt.Errorf("Failed to publish message to %s", ms.cfg.Channel)
 	}
